@@ -12,7 +12,8 @@
     <param name="planner_patience" value="5.0" />
 
     <param name="base_global_planner" value="navfn/NavfnROS" />
-    <param name="base_local_planner" value="base_local_planner/TrajectoryPlannerROS" />
+    <!-- <param name="base_local_planner" value="base_local_planner/TrajectoryPlannerROS" /> -->
+    <param name="base_local_planner" value="" />
 
     <param name="recovery_behavior_enabled" value="false" />
     <param name="clearing_rotation_allowed" value="false" />
@@ -24,6 +25,6 @@
     <rosparam file="$(find spark_movebase)/param/global_costmap_params.yaml" command="load" />
 
     <rosparam file="$(find spark_movebase)/param/navfn_global_planner_params.yaml" command="load" />
-    <rosparam file="$(find spark_movebase)/param/dwa_local_planner_params.yaml" command="load" />
+    <!-- <rosparam file="$(find spark_movebase)/param/dwa_local_planner_params.yaml" command="load" /> -->
  </node>
 </launch>
