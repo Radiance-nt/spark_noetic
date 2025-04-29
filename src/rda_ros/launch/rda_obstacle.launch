@@ -1,0 +1,8 @@
+
+<launch>
+  <node pkg="rda_ros" type="obstacle_clustering_node.py" name="obstacle_clustering_node" output="screen">
+    <param name="executable" value="python" />
+    <rosparam command="load" file="$(find rda_ros)/config/obstacle.yaml" />
+    <remap from="/rda_obstacles" to="/move_base/local_costmap/obstacles" /> <!-- 障碍物信息 -->
+  </node>
+</launch>

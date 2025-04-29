@@ -3,12 +3,13 @@
     <!-- 加载 RDA 参数文件 -->
     <param name="executable" value="python" />
     <rosparam command="load" file="$(find rda_ros)/config/rda_params.yaml" />
-    
-    <!-- 指定 Topic 接口 -->
-    
     <remap from="/rda_sub_path" to="/move_base/NavfnROS/plan" />  <!-- 订阅全局路径 -->
+    <remap from="/rda_obstacles" to="/move_base/local_costmap/obstacles" /> <!-- 障碍物信息 -->
+  </node>
+
+  <node pkg="rda_planner" type="rda_velocity_publisher_node.py" name="rda_velocity_publisher" output="screen">
     <!-- <remap from="/rda_cmd_vel" to="/cmd_vel" /> -->
     <remap from="/rda_cmd_vel" to="/navigation_velocity_smoother/raw_cmd_vel" />
-    <remap from="/rda_obstacles" to="/move_base/local_costmap/obstacles" /> <!-- 障碍物信息 -->
+    <param name="pub_rate" value="50"/>
   </node>
 </launch>

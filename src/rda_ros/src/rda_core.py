@@ -28,12 +28,13 @@ class rda_core:
     def __init__(self) -> None:
 
         # publish topics
-        self.vel_pub = rospy.Publisher("/rda_cmd_vel", Twist, queue_size=10)
         self.rda_path_pub = rospy.Publisher("/rda_opt_path", Path, queue_size=10)
-
         self.ref_path_pub = rospy.Publisher("/rda_ref_path", Path, queue_size=10)
         self.ref_states_pub = rospy.Publisher("/rda_ref_states", Path, queue_size=10)
         self.obs_pub = rospy.Publisher("/rda_obs_markers", MarkerArray, queue_size=10)
+        
+        # Published planned trajectory with velocities (for velocity publisher node)
+        self.planned_traj_pub = rospy.Publisher("/rda_planned_trajectory", Path, queue_size=10)
 
         rospy.init_node("rda_node", anonymous=True)
 
@@ -101,6 +102,9 @@ class rda_core:
         # for visualization
         self.marker_x = rospy.get_param("~marker_x", 0.05)
         self.marker_lifetime = rospy.get_param("~marker_lifetime", 0.1)
+        
+        # Planning rate
+        self.planning_rate = rospy.get_param("~planning_rate", 10)  # Hz
 
         # initialize
         self.robot_state = None
@@ -148,15 +152,15 @@ class rda_core:
             rospy.Subscriber("/scan", LaserScan, self.scan_callback)
 
     def control(self):
-
-        rate = rospy.Rate(50)
+        """Main planning loop that runs at a lower frequency than velocity publishing"""
+        rate = rospy.Rate(self.planning_rate)
 
         while not rospy.is_shutdown():
-
             self.read_robot_state()
 
             if self.robot_state is None:
                 rospy.loginfo_throttle(1, "waiting for robot states")
+                rate.sleep()
                 continue
 
             if len(self.obstacle_list) == 0:
@@ -166,16 +170,15 @@ class rda_core:
                 self.obs_pub.publish(rda_obs_markers)
 
             if self.rda_opt.no_ref_path():
-
                 rospy.loginfo_throttle(
                     1, "waiting for reference path, topic '/rda_sub_path' "
                 )
                 continue
-
             else:
                 ref_path = self.convert_to_path(self.ref_path_list)
                 self.ref_path_pub.publish(ref_path)
 
+            # Run MPC controller
             if self.max_obstacle_num == 0:
                 opt_vel, info = self.rda_opt.control(
                     self.robot_state, self.ref_speed, []
@@ -187,7 +190,6 @@ class rda_core:
 
             if info["arrive"]:
                 if self.loop:
-
                     self.goal = self.rda_opt.ref_path[0]
                     start = self.rda_opt.ref_path[-1]
 
@@ -204,18 +206,56 @@ class rda_core:
                     opt_vel = np.zeros((2, 1))
                     print("arrive at the goal!")
 
-            vel = self.convert_to_twist(opt_vel)
+            # Publish planned trajectory with velocities to be used by velocity publisher
+            planned_traj = self.create_planned_trajectory(info["opt_state_list"], info["opt_vel_list"])
+            self.planned_traj_pub.publish(planned_traj)
+            
+            # Publish visualization paths
             rda_opt_path = self.convert_to_path(info["opt_state_list"])
             ref_states = self.convert_to_path(info["ref_traj_list"])
-
             self.ref_states_pub.publish(ref_states)
-            self.vel_pub.publish(vel)
             self.rda_path_pub.publish(rda_opt_path)
 
             rate.sleep()
 
-    def read_robot_state(self):
+    def create_planned_trajectory(self, states, velocities):
+        """Create a Path message with velocity information stored in poses"""
+        path = Path()
+        path.header.seq = 0
+        path.header.stamp = rospy.get_rostime()
+        path.header.frame_id = self.target_frame
+        
+        # Make sure states and velocities have the same length
+        min_len = min(len(states), len(velocities))
+        
+        for i in range(min_len):
+            ps = PoseStamped()
+            ps.header.seq = i
+            ps.header.stamp = rospy.get_rostime()
+            ps.header.frame_id = self.target_frame
+            
+            # Store position
+            ps.pose.position.x = states[i][0, 0]
+            ps.pose.position.y = states[i][1, 0]
+            
+            # Store heading in the orientation
+            theta = states[i][2, 0] if states[i].shape[0] > 2 else 0.0
+            ps.pose.orientation.z = np.sin(theta/2)
+            ps.pose.orientation.w = np.cos(theta/2)
+            
+            # Store velocities in unused position z and orientation x/y fields
+            # Linear velocity in z
+            ps.pose.position.z = velocities[i][0, 0]
+            # Angular velocity in orientation x
+            ps.pose.orientation.x = velocities[i][1, 0]
+            # Timestamp offset in orientation y (not used currently)
+            ps.pose.orientation.y = i * self.rda_opt.sample_time
+            
+            path.poses.append(ps)
+            
+        return path
 
+    def read_robot_state(self):
         try:
             (trans, rot) = self.listener.lookupTransform(
                 self.target_frame, self.base_frame, rospy.Time(0)
@@ -238,7 +278,6 @@ class rda_core:
             )
 
     def obstacle_callback(self, obstacle_array):
-
         temp_obs_list = []
 
         if self.max_obstacle_num == 0:
@@ -252,7 +291,6 @@ class rda_core:
 
             if vertex_num == 1:
                 # circle obstacle
-
                 center = np.array([[vertex[0].x], [vertex[0].y]])
                 radius = obstacles.radius
 
@@ -288,7 +326,6 @@ class rda_core:
         self.obstacle_list[:] = temp_obs_list[:]
 
     def path_callback(self, path):
-
         self.ref_path_list = []
 
         for p in path.poses:
@@ -310,7 +347,6 @@ class rda_core:
         self.rda_opt.update_ref_path(self.ref_path_list)
 
     def goal_callback(self, goal):
-
         x = goal.pose.position.x
         y = goal.pose.position.y
         theta = self.quat_to_yaw(goal.pose.orientation)
@@ -337,7 +373,6 @@ class rda_core:
         self.rda_opt.update_ref_path(self.ref_path_list)
 
     def scan_callback(self, scan_data):
-
         ranges = np.array(scan_data.ranges)
         angles = np.linspace(scan_data.angle_min, scan_data.angle_max, len(ranges))
 
@@ -358,7 +393,6 @@ class rda_core:
             return
 
         else:
-
             # get the transform from lidar to target frame
             try:
                 trans, rot = self.listener.lookupTransform(
@@ -408,7 +442,6 @@ class rda_core:
                     )
 
     def generate_ref_path_list(self):
-
         if len(self.waypoints) == 0:
             return []
 
@@ -424,7 +457,6 @@ class rda_core:
             return ref_path_list
 
     def convert_to_markers(self, obs_list):
-
         marker_array = MarkerArray()
 
         # obs: center, radius, vertex, cone_type, velocity
@@ -442,12 +474,8 @@ class rda_core:
 
             marker.lifetime = rospy.Duration(self.marker_lifetime)
 
-            # breakpoint()
-
             if obs.vertex is not None:
-
                 marker.type = marker.LINE_LIST
-
                 marker.scale.x = self.marker_x
 
                 temp_matrix = np.hstack((obs.vertex, obs.vertex[:, 0:1]))
@@ -501,18 +529,8 @@ class rda_core:
 
         return path
 
-    def convert_to_twist(self, rda_vel):
-        # from 2*1 vector to twist
-
-        vel = Twist()
-        vel.linear.x = rda_vel[0, 0]  # linear
-        vel.angular.z = rda_vel[1, 0]  # steering
-
-        return vel
-
     @staticmethod
     def quat_to_yaw(quater):
-
         x = quater.x
         y = quater.y
         z = quater.z
@@ -524,7 +542,6 @@ class rda_core:
 
     @staticmethod
     def quat_to_yaw_list(quater):
-
         x = quater[0]
         y = quater[1]
         z = quater[2]
@@ -535,7 +552,6 @@ class rda_core:
         return raw
 
     def generate_robot_tuple(self, robot_info):
-
         if robot_info is None:
             print("Lack of car information, please check the robot_info in config file")
             return
@@ -577,7 +593,6 @@ class rda_core:
         """
         vertex: 2*num
         """
-
         num = vertex.shape[1]
 
         G = np.zeros((num, 2))
@@ -613,7 +628,6 @@ class rda_core:
         Returns:
             tuple: Translation vector and rotation matrix.
         """
-
         if state.shape == (2, 1):
             rot = np.array([[1, 0], [0, 1]])
             trans = state[0:2]

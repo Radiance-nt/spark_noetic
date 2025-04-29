@@ -1,0 +1,5 @@
+
+scan_eps: 0.2
+scan_min_samples: 6
+target_frame: "map"             # 全局坐标系 (必须与move_base的global_frame一致)
+lidar_frame: "lidar_link"       # 激光雷达坐标系

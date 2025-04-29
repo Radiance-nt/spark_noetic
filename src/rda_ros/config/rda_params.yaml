@@ -13,11 +13,10 @@ robot_info:
 # ========================
 # 传感器输入配置
 # ========================
-use_scan_obstacle: true         # true=激光雷达输入, false=代价地图障碍物输入
+use_scan_obstacle: false         # true=激光雷达输入, false=代价地图障碍物输入
 scan_topic: "/scan"             # 激光雷达 Topic (use_scan_obstacle=true时生效)
 scan_eps: 0.3                   # DBSCAN聚类半径 (米)
 scan_min_samples: 5            # 最小聚类点数
-obstacle_topic: "/move_base/obstacles"  # 代价地图障碍物 Topic (use_scan_obstacle=false时生效)
 
 # ========================
 # 坐标系设置
